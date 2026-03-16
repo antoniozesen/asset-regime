@@ -96,6 +96,17 @@ TICKERS = {
     "EURUSD=X": "EUR/USD", "USDJPY=X": "USD/JPY", "GBPUSD=X": "GBP/USD", "USDCHF=X": "USD/CHF",
 }
 
+MACRO_ATLAS = {
+    "US Activity": ["INDPRO", "PAYEMS", "RRSFS", "IPMAN", "HOUST", "DGORDER"],
+    "US Inflation": ["CPIAUCSL", "CPILFESL", "PCEPI", "PCEPILFE", "PPIFID", "MEDCPIM158SFRBCLE"],
+    "US Labor": ["UNRATE", "U6RATE", "CIVPART", "AHETPI", "ICSA", "CCSA"],
+    "US Rates & Conditions": ["DGS2", "DGS5", "DGS10", "DGS30", "DFII10", "FEDFUNDS", "NFCI", "BAA10YM", "TEDRATE", "VIXCLS"],
+    "Surveys": ["UMCSENT", "BUSLOANS", "PMI", "NAPM", "AMTMNO", "BSCICP03USM665S"],
+    "Europe": ["CP0000EZ19M086NEST", "IR3TIB01EZM156N", "IRLTLT01EZM156N", "BSCICP03EZM665S", "CSCICP03EZM665S", "LRHUTTTTEZM156S"],
+    "Japan": ["JPNCPIALLMINMEI", "JPNPROINDMISMEI", "IRLTLT01JPM156N", "IR3TIB01JPM156N", "LRUNTTTTJPM156S"],
+    "EM / Global": ["FPCPITOTLZGCHN", "FPCPITOTLZGIND", "FPCPITOTLZGZAF", "PALLFNFINDEXM", "GOLDAMGBD228NLBM", "DCOILBRENTEU"],
+}
+
 
 def safe_last(df: pd.DataFrame, fmt: str = "{:.2f}", suffix: str = ""):
     if df is None or df.empty:
@@ -278,6 +289,16 @@ with st.spinner(t("Loading data from FRED + Yahoo…", "Cargando datos de FRED +
     curve_df, curve_status = build_curve(fred_curve)
 
     prices = {tk: fetch_yahoo(tk, "5y") for tk in TICKERS}
+
+    atlas_series = {}
+    atlas_info = {}
+    for grp, series_ids in MACRO_ATLAS.items():
+        for sid in series_ids:
+            if sid in atlas_series:
+                continue
+            atlas_series[sid] = fetch_fred(sid, fred_key)
+            atlas_info[sid] = fetch_fred_info(sid, fred_key)
+
     metrics = {}
     for tk, df in prices.items():
         if df.empty:
@@ -333,6 +354,8 @@ tabs = st.tabs([
     t("⚠️ Risk", "⚠️ Riesgo"),
     t("🧮 Allocation", "🧮 Asignación"),
     t("🗂 Data Quality", "🗂 Calidad de Datos"),
+    t("🧱 Macro Atlas", "🧱 Atlas Macro"),
+    t("📚 ETFs & Indices", "📚 ETFs e Índices"),
 ])
 
 with tabs[0]:
@@ -475,3 +498,97 @@ with tabs[6]:
 
     st.markdown("**Self-checks**")
     st.json(checks)
+
+with tabs[7]:
+    st.markdown("### Macro Atlas — Full Coverage from FRED")
+    for grp, series_ids in MACRO_ATLAS.items():
+        st.markdown(f"#### {grp}")
+        rows = []
+        chart_sets = []
+        palette = [DARK_COLORS["blue"], DARK_COLORS["green"], DARK_COLORS["red"], DARK_COLORS["amber"], DARK_COLORS["violet"]]
+        for i, sid in enumerate(series_ids):
+            df = atlas_series.get(sid, pd.DataFrame())
+            info = atlas_info.get(sid, {})
+            last_obs = str(df.index.max().date()) if not df.empty else "—"
+            stale = (pd.Timestamp.now() - pd.Timestamp(df.index.max())).days if not df.empty else np.nan
+            rows.append(
+                {
+                    "series_id": sid,
+                    "title": info.get("title", ""),
+                    "units": info.get("units", ""),
+                    "freq": info.get("frequency", ""),
+                    "last_obs": last_obs,
+                    "staleness_days": stale,
+                    "latest_value": safe_last(df),
+                    "zscore": f"{zscore(df['value']).dropna().iloc[-1]:+.2f}" if not df.empty and not zscore(df["value"]).dropna().empty else "—",
+                }
+            )
+            if not df.empty:
+                chart_sets.append((sid, recent_months(df, lookback), palette[i % len(palette)]))
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        if chart_sets:
+            st.plotly_chart(line_fig(chart_sets[:6], f"{grp} — recent history", height=340), width="stretch")
+
+    st.markdown("#### Survey signal scorecard")
+    survey_ids = MACRO_ATLAS["Surveys"]
+    survey_rows = []
+    for sid in survey_ids:
+        df = atlas_series.get(sid, pd.DataFrame())
+        if df.empty:
+            continue
+        zz = zscore(df["value"]).dropna()
+        survey_rows.append({"series": sid, "z": zz.iloc[-1] if not zz.empty else np.nan, "pct": percentile_rank(df["value"])})
+    if survey_rows:
+        sdf = pd.DataFrame(survey_rows).sort_values("z")
+        fig = px.bar(sdf, x="z", y="series", orientation="h", color="z", color_continuous_scale="RdYlGn", title="Surveys z-score ranking")
+        fig.update_layout(paper_bgcolor=DARK_COLORS["bg"], plot_bgcolor=DARK_COLORS["panel"], font=dict(color=DARK_COLORS["text"]))
+        st.plotly_chart(fig, width="stretch")
+
+with tabs[8]:
+    st.markdown("### ETF & Indices Deep Monitor")
+    by_bucket = {
+        "Regions": ["SPY", "VGK", "EWJ", "IEMG"],
+        "Sectors": ["XLK", "XLF", "XLI", "XLV", "XLP", "XLU", "XLE", "XLB", "XLY", "XLRE", "XLC"],
+        "Factors": ["QUAL", "MTUM", "USMV", "VLUE", "VUG", "IVE", "IVW"],
+        "Rates/Credit": ["TLT", "IEF", "LQD", "HYG", "BIL"],
+        "Commodities/FX": ["GLD", "GC=F", "BZ=F", "CL=F", "NG=F", "HG=F", "SI=F", "EURUSD=X", "USDJPY=X", "GBPUSD=X", "USDCHF=X"],
+    }
+
+    for bucket, tks in by_bucket.items():
+        rows = []
+        for tk in tks:
+            m = metrics.get(tk)
+            if not m:
+                rows.append({"ticker": tk, "name": TICKERS.get(tk, tk), "status": "missing", "1M": np.nan, "3M": np.nan, "12M": np.nan, "vol": np.nan, "dd": np.nan, "pct": np.nan, "vs_ma200": np.nan})
+                continue
+            rows.append({
+                "ticker": tk,
+                "name": TICKERS.get(tk, tk),
+                "status": "ok",
+                "1M": m["m1"],
+                "3M": m["m3"],
+                "12M": m["m12"],
+                "vol": m["vol"],
+                "dd": m["dd"],
+                "pct": m["pct"],
+                "vs_ma200": m["vs_ma200"],
+            })
+        bdf = pd.DataFrame(rows)
+        st.markdown(f"#### {bucket}")
+        st.dataframe(bdf, width="stretch", hide_index=True)
+        ok_df = bdf[bdf["status"] == "ok"].dropna(subset=["12M"]) if not bdf.empty else pd.DataFrame()
+        if not ok_df.empty:
+            fig = px.bar(ok_df.sort_values("12M"), x="12M", y="ticker", orientation="h", color="12M", color_continuous_scale="RdYlGn", title=f"{bucket} 12M performance")
+            fig.update_layout(paper_bgcolor=DARK_COLORS["bg"], plot_bgcolor=DARK_COLORS["panel"], font=dict(color=DARK_COLORS["text"]))
+            st.plotly_chart(fig, width="stretch")
+
+    st.markdown("#### Price explorer")
+    selected_tickers = st.multiselect("Tickers", list(TICKERS.keys()), default=["SPY", "TLT", "GLD", "EURUSD=X"])
+    datasets = []
+    pal = [DARK_COLORS["blue"], DARK_COLORS["green"], DARK_COLORS["red"], DARK_COLORS["amber"], DARK_COLORS["violet"]]
+    for i, tk in enumerate(selected_tickers):
+        df = prices.get(tk, pd.DataFrame())
+        if not df.empty:
+            datasets.append((tk, recent_months(df, lookback), pal[i % len(pal)]))
+    if datasets:
+        st.plotly_chart(line_fig(datasets, "Selected tickers", height=380), width="stretch")
