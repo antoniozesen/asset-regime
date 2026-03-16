@@ -23,7 +23,7 @@ def momentum(df, periods):
 
 
 def max_drawdown(series):
-    s = pd.Series(series).dropna()
+    s = pd.Series(np.asarray(series).reshape(-1)).dropna()
     if len(s) < 2:
         return np.nan
     roll_max = s.cummax()

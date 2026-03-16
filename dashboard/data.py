@@ -5,6 +5,41 @@ import requests
 import streamlit as st
 
 
+def ensure_timeseries(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["value"])
+
+    out = df.copy()
+
+    if isinstance(out.columns, pd.MultiIndex):
+        out.columns = [str(c[0]) if isinstance(c, tuple) else str(c) for c in out.columns]
+
+    if "value" not in out.columns:
+        candidates = ["Close", "Adj Close", "close", "VALUE", "OBS_VALUE", "obs_value"]
+        found = next((c for c in candidates if c in out.columns), None)
+        if found is None:
+            numeric_cols = out.select_dtypes(include=["number"]).columns.tolist()
+            if not numeric_cols:
+                return pd.DataFrame(columns=["value"])
+            found = numeric_cols[0]
+        out = out[[found]].rename(columns={found: "value"})
+    else:
+        out = out[["value"]]
+
+    out["value"] = pd.to_numeric(out["value"], errors="coerce")
+    out = out.dropna(subset=["value"])
+
+    if "date" in out.columns:
+        out["date"] = pd.to_datetime(out["date"], errors="coerce")
+        out = out.dropna(subset=["date"]).set_index("date")
+
+    if not isinstance(out.index, pd.DatetimeIndex):
+        out.index = pd.to_datetime(out.index, errors="coerce")
+        out = out[~out.index.isna()]
+
+    return out.sort_index()
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_fred(series_id, api_key, limit=500):
     if not api_key:
@@ -24,7 +59,7 @@ def fetch_fred(series_id, api_key, limit=500):
         if df.empty:
             return pd.DataFrame()
         df["date"] = pd.to_datetime(df["date"])
-        return df.sort_values("date").set_index("date")
+        return ensure_timeseries(df.sort_values("date").set_index("date"))
     except Exception:
         return pd.DataFrame()
 
@@ -40,7 +75,7 @@ def fetch_ecb(flow, key, start="2005-01"):
         periods = d["structure"]["dimensions"]["observation"][0]["values"]
         rows = [(pd.to_datetime(p["id"]), series["observations"].get(str(i), [None])[0]) for i, p in enumerate(periods)]
         df = pd.DataFrame(rows, columns=["date", "value"]).dropna()
-        return df.set_index("date")
+        return ensure_timeseries(df.set_index("date"))
     except Exception:
         return pd.DataFrame()
 
@@ -52,8 +87,13 @@ def fetch_yahoo(ticker, period="5y"):
 
         df = yf.download(ticker, period=period, auto_adjust=True, progress=False)
         if df.empty:
-            return pd.DataFrame()
-        return df[["Close"]].rename(columns={"Close": "value"})
+            return pd.DataFrame(columns=["value"])
+
+        close = df.get("Close")
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:, 0]
+        out = pd.DataFrame({"value": close})
+        return ensure_timeseries(out)
     except Exception:
         return pd.DataFrame()
 
@@ -73,6 +113,6 @@ def fetch_bis(flow, key):
         out.columns = ["date", "value"]
         out["date"] = pd.to_datetime(out["date"], errors="coerce")
         out["value"] = pd.to_numeric(out["value"], errors="coerce")
-        return out.dropna().sort_values("date").set_index("date")
+        return ensure_timeseries(out.dropna().sort_values("date").set_index("date"))
     except Exception:
         return pd.DataFrame()

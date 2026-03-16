@@ -53,6 +53,13 @@ def line_fig(datasets, title, height=350, ref_zero=False):
     return fig
 
 
+def recent_months(df: pd.DataFrame, months: int) -> pd.DataFrame:
+    if df is None or df.empty or not isinstance(df.index, pd.DatetimeIndex):
+        return pd.DataFrame(columns=["value"])
+    cutoff = df.index.max() - pd.DateOffset(months=months)
+    return df.loc[df.index >= cutoff]
+
+
 with st.spinner(t("Loading market data…", "Cargando datos de mercado…")):
     fred = {}
     if fred_key:
@@ -112,13 +119,13 @@ with tabs[0]:
     st.plotly_chart(
         line_fig(
             [
-                ("EA 10Y", ecb_ea10y.last(f"{lookback}ME"), DARK_COLORS["blue"]),
-                ("EA 2Y", ecb_ea2y.last(f"{lookback}ME"), DARK_COLORS["violet"]),
-                ("US 10Y", fred.get("us10y", pd.DataFrame()).last(f"{lookback}ME"), DARK_COLORS["red"]),
+                ("EA 10Y", recent_months(ecb_ea10y, lookback), DARK_COLORS["blue"]),
+                ("EA 2Y", recent_months(ecb_ea2y, lookback), DARK_COLORS["violet"]),
+                ("US 10Y", recent_months(fred.get("us10y", pd.DataFrame()), lookback), DARK_COLORS["red"]),
             ],
             t("Rates Overview", "Resumen de Tipos"),
         ),
-        use_container_width=True,
+        width="stretch",
     )
 
 with tabs[1]:
@@ -140,19 +147,19 @@ with tabs[1]:
             }
         )
     if rows:
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
 with tabs[2]:
     st.plotly_chart(
         line_fig(
             [
-                ("TLT", prices["TLT"].last(f"{lookback}ME"), DARK_COLORS["blue"]),
-                ("LQD", prices["LQD"].last(f"{lookback}ME"), DARK_COLORS["green"]),
-                ("HYG", prices["HYG"].last(f"{lookback}ME"), DARK_COLORS["red"]),
+                ("TLT", recent_months(prices["TLT"], lookback), DARK_COLORS["blue"]),
+                ("LQD", recent_months(prices["LQD"], lookback), DARK_COLORS["green"]),
+                ("HYG", recent_months(prices["HYG"], lookback), DARK_COLORS["red"]),
             ],
             t("Bond ETF Proxies", "ETFs Proxy de Bonos"),
         ),
-        use_container_width=True,
+        width="stretch",
     )
 
     if fred_key and not fred.get("ig_oas", pd.DataFrame()).empty:
@@ -164,24 +171,24 @@ with tabs[3]:
     st.plotly_chart(
         line_fig(
             [
-                ("EUR/USD", ecb_eurusd.last(f"{lookback}ME"), DARK_COLORS["blue"]),
-                ("EUR/USD (Yahoo)", prices["EURUSD=X"].last(f"{lookback}ME"), DARK_COLORS["green"]),
+                ("EUR/USD", recent_months(ecb_eurusd, lookback), DARK_COLORS["blue"]),
+                ("EUR/USD (Yahoo)", recent_months(prices["EURUSD=X"], lookback), DARK_COLORS["green"]),
             ],
             "EUR/USD",
         ),
-        use_container_width=True,
+        width="stretch",
     )
 
 with tabs[4]:
     st.plotly_chart(
         line_fig(
             [
-                ("GLD", prices["GLD"].last(f"{lookback}ME"), DARK_COLORS["amber"]),
-                ("WTI", prices["CL=F"].last(f"{lookback}ME"), DARK_COLORS["red"]),
+                ("GLD", recent_months(prices["GLD"], lookback), DARK_COLORS["amber"]),
+                ("WTI", recent_months(prices["CL=F"], lookback), DARK_COLORS["red"]),
             ],
             t("Commodities", "Materias Primas"),
         ),
-        use_container_width=True,
+        width="stretch",
     )
 
 with tabs[5]:
@@ -197,7 +204,7 @@ with tabs[5]:
     if not bis_credit_us.empty:
         macro_rows.append({"Signal": "BIS US Credit/GDP", "Value": round(bis_credit_us["value"].iloc[-1], 2)})
     if macro_rows:
-        st.dataframe(pd.DataFrame(macro_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(macro_rows), width="stretch", hide_index=True)
 
     if fred_key and not fred.get("us_cpi", pd.DataFrame()).empty:
         cpi_series = fred["us_cpi"]["value"].pct_change(12) * 100
@@ -214,7 +221,7 @@ with tabs[6]:
     ]
     st.dataframe(
         pd.DataFrame(sources, columns=[t("Source", "Fuente"), "URL", "Auth", t("Coverage", "Cobertura")]),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
